@@ -1,0 +1,192 @@
+from noise import pnoise2
+
+
+# constants
+DIRECTIONS = [
+    [+1,+1,+0], [-1,-1,+0],
+    [+1,+0,-1], [-1,+0,+1],
+    [+0,-1,-1], [+0,+1,+1]]
+
+AXES = {
+    'x':[+1,+1,+0],
+    'y':[+1,+0,-1],
+    'z':[+0,+1,+1]}
+
+
+
+# decorators
+def coords_as_sep(i):
+    def _coords(func):
+        def __coords(*args, **kargs):
+            if type(args[i]) not in [list,tuple]: return func(*args,**kargs)
+            return func(*args[:i],*args[i],*args[i+1:],**kargs)
+        return __coords
+    return _coords
+
+def coords_as_list(i):
+    def _coords(func):
+        def __coords(*args, **kargs):
+            if type(args[i]) in [list,tuple]: return func(*args[:i],list(args[i]),*args[i+1:],**kargs)
+            if len(args)-i<3: raise IndexError
+            return func(*args[:i],[args[i],args[i+1],args[i+2]],*args[i+3:],**kargs)
+        return __coords
+    return _coords
+
+
+
+# classes
+class Hex:
+    ''''''
+    position = None
+    value = None
+
+    def __init__(self, position) -> None:
+        self.position = position
+
+    def __str__(self):
+        return str(self.value)
+
+    def gen(self, gen_value:int):
+        self.gen_value = gen_value
+
+
+
+class HexField:
+    '''Base for custom hex field
+
+    '''
+    size = None
+    hexType = Hex
+
+
+    def __init__(self, **kargs) -> None:
+        # variables
+        if 'size' in kargs: self.size = kargs['size']
+        if self.size == None: raise
+        if 'hexType' in kargs: self.hexType = kargs['hexType']
+        if self.hexType == None: raise
+
+        # field setup
+        self.field = [[self.hexType([_x,_y,self.get_z(_x,_y)]) if self.is_on_hex(_x,_y,self.get_z(_x,_y)) else None for _x in range(self.size)] for _y in range(self.size)]
+
+
+    # basic
+    def __repr__(self) -> str:
+        max_value = max(map(lambda hex:len(str(hex)),[self.hexType.value]+self.get_all_hexes()))
+        return '\n'.join(f"[{'|'.join([str(hex).ljust(max_value) for hex in row])}]" for row in self.field)
+    
+    def __sizeof__(self) -> int:
+        return self.size
+    
+
+    # gen
+    def gen(self, frec:int=None, seed:int=0):
+        '''generates random values for each hex on field'''
+        if frec == None: frec = self.size+1
+        
+        for coords in self.get_all_coords():
+            self.__getitem__(*coords).gen(pnoise2((coords[0]+1)/frec,(coords[1]+1)/frec,base=seed))
+
+    # item
+    @coords_as_sep(1)
+    def __getitem__(self, x:int, y:int, z:int) -> Hex:
+        if not self.is_on_hex(x,y,z): raise IndexError
+        return self.field[x][y]
+   
+    @coords_as_sep(1)
+    def __setitem__(self, x:int, y:int, z:int, value:Hex) -> None:
+        if not self.is_on_hex(x,y,z): raise IndexError
+        if type(value) != Hex: raise TypeError
+        self.field[x][y] = value
+        
+
+    #
+    @coords_as_sep(1)
+    def is_on_hex(self, x:int, y:int, z:int) -> bool: 
+        return z==y+self.size//2-x \
+            and 0<=x<self.size \
+            and 0<=y<self.size \
+            and 0<=z<self.size
+        
+
+    # movings
+    @coords_as_list(1)
+    def get_move(self, pos:list, axes:dict) -> list:
+        pos = self._get_move(pos,axes)
+        if not self.is_on_hex(pos): return None
+        return pos
+    
+    @coords_as_list(1)
+    def _get_move(self, pos:list, axes:dict) -> list:
+        for axis in axes.items():
+            for i in range(3): pos[i]+=AXES[axis[0]][i]*axis[1]
+        return pos
+
+
+    # getters
+    def get_center_hex(self) -> list:
+        return self.field[self.size//2, self.size//2]
+    def get_center_coord(self) -> list:
+        return [self.size//2, self.size//2]
+
+    def get_all_hexes(self) -> list:
+        ret = []
+        for x in range(self.size):
+            for y in range(self.size):
+                if self.is_on_hex(x,y,self.get_z(x,y)):
+                    ret.append(self.field[x][y])
+        return ret
+        
+    def get_all_coords(self) -> list:
+        ret = []
+        for x in range(self.size):
+            for y in range(self.size):
+                z = self.get_z(x,y)
+                if self.is_on_hex(x,y,z):
+                    ret.append([x,y,z])
+        return ret
+    
+    def get_hex_neighbours(x:int, y:int, z:int) -> list:
+        return [
+            [x+1,y+1,z+0], [x+0,y+1,z+1],
+            [x+1,y+0,z-1], [x-1,y+0,z+1],
+            [x+0,y-1,z-1], [x-1,y-1,z+0]]
+
+
+    # axis converters
+    def get_x(self, y:int, z:int) -> int: 
+        return y+self.size//2-z
+    
+    def get_y(self, x:int, z:int) -> int: 
+        return z+x-self.size//2
+    
+    def get_z(self, x:int, y:int) -> int: 
+        return y+self.size//2-x
+    
+
+
+if __name__ == "__main__":
+    import os
+    class testHex(Hex):
+        def __str__(self):
+            if hero.position == self.position:
+                return "B"
+            return str(self.position)
+
+
+    class testField(HexField):
+        size = 10
+        hexType = testHex
+
+    class Hero:
+        def __init__(self, position):
+            self.hp = 10
+            self.position = position
+
+    field = testField()
+    hero = Hero(field.get_center_coord)
+    while True:
+        os.system('cls' if os.name == 'nt' else 'clear')
+        print(field)
+        print(field)
+        request = input()
